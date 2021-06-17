@@ -1,0 +1,519 @@
+/*
+ * RECEIVE - receive a NETDATA file
+ *
+ * Created by: Kevin E. Jordan
+ *             Nostalgic Computing Center
+ *             http://www.nostalgiccomputing.org
+ *
+ * Command format:
+ *
+ *   RECEIVE [spoolid] [fn [ft [fm]]] [(REPlace[)]]
+ *
+ * where:
+ *
+ *   spoolid : numeric spoolid of a NETDATA-formatted file in the user's
+ *             virtual reader. If omitted, the next class N file, if any, is
+ *             obtained from the reader.
+ *   fn      : file name to assign to the decoded file. If omitted or specified
+ *             as "=", the file name is obtained from the NETDATA utility
+ *             control record.
+ *   ft      : file type to assign to the decoded file. If omitted or specified
+ *             as "=", the file type is obtained from the NETDATA utility
+ *             control record.
+ *   fm      : file mode to assign to the decoded file. If omitted or specified
+ *             as "=", the file mode is obtained from the NETDATA utility
+ *             control record.
+ */
+
+INMLRECL = x2d("0042")  /* Logical record length    */
+INMFNODE = x2d("1011")  /* Origin node name         */
+INMFUID  = x2d("1012")  /* Origin userid            */
+INMTNODE = x2d("1001")  /* Target node name         */
+INMTUID  = x2d("1002")  /* Target userid            */
+INMFTIME = x2d("1024")  /* Origin time stamp        */
+INMNUMF  = x2d("102F")  /* Number of files          */
+INMSIZE  = x2d("102C")  /* File size in bytes       */
+INMDSORG = x2d("003C")  /* File organization        */
+INMUTILN = x2d("1028")  /* Name of utility function */
+INMRECFM = x2d("0049")  /* Record format            */
+INMDSNAM = x2d("0002")  /* Name of the file         */
+INMFFM   = x2d("102D")  /* Filemode number          */
+INMLCHG  = x2d("1021")  /* Last change date         */
+
+netdatafile = "RECEIVE TEMP A1"
+outputfile  = ""
+
+arg params "(" options ")"
+
+isreplace = 0
+if options <> "" then
+  do
+  if abbrev("REPLACE", strip(options), 3) then
+    do
+    isreplace = 1
+    end
+  else
+    do
+    say "Unrecognized option:" options
+    exit 1
+    end
+  end
+
+parse upper var params spoolid fn ft fm rest
+
+if rest <> "" then
+  do
+  say "Too many command arguments"
+  exit 1
+  end
+
+"cp spool rdr class *"
+if datatype(spoolid) = "NUM" then
+  do
+  "executil qreader" spoolid
+  if rc <> 0 then
+    do
+    say "Spoolid" spoolid "is not available"
+    exit rc
+    end
+  end
+else
+  do
+  if spoolid <> "" then parse upper var params fn ft fm rest
+  if rest <> "" then
+    do
+    say "Too many command arguments"
+    exit 1
+    end
+  "executil qreader first class n"
+  if rc <> 0 then
+    do
+    say "No spool files available"
+    exit rc
+    end
+  end
+
+pull spoolid class .
+"cp set imsg off"
+"execio 0 cp (string ORDER RDR" spoolid
+status = rc
+"cp set imsg on"
+if status <> 0 then
+  do
+  say "Spoolid" spoolid "is not available"
+  exit status
+  end
+
+"set cmstype ht"
+"readcard" netdatafile
+status = rc
+"set cmstype rt"
+
+if status <> 0 then
+  do
+  if status = 8 then
+    do
+    say "Reader is empty or not ready"
+    end
+  else
+    do
+    say "Failed to get file from reader, rc =" status
+    end
+  exit status
+  end
+
+if fn = "" then
+  do
+  fn = "="
+  ft = "="
+  end
+if ft = "" then
+  ft = "="
+if fm = "" then
+  fm = "A1"
+
+/*
+ * Read logical records from the file.
+ */
+
+cursor = 1
+fileidx = 0
+inputbuffer = ""
+outputfile = ""
+record = ""
+recnum = 1
+
+INMR. = ""
+INMR.1.INMNUMF.0 = 1
+INMR.1.INMNUMF.1 = 1
+
+ctrlmask  = d2c(x2d("20"),1)
+firstmask = d2c(x2d("80"),1)
+lastmask  = d2c(x2d("40"),1)
+
+do forever
+  len = getbyte()
+  if len < 2 then
+    do
+    say "Invalid record length detected"
+    call respoolfile
+    exit 99
+    end
+  flags = getbyte()
+  len = len - 2
+  if bitand(d2c(flags,1), ctrlmask) = ctrlmask then /* control record */
+    do
+    call readctrlrecord len, flags
+    end
+  else /* data record */
+    do 
+    call readdatarecord len, flags
+    end
+end
+
+exit
+
+/*
+ * readctrlrecord
+ *
+ * Read a control record and create a stem structure from its text units.
+ * 
+ * arg(1) : length of record
+ * arg(2) : flags
+ */
+readctrlrecord:
+arg reclen, flags
+if reclen < 6 then
+  do
+  say "Invalid control record identifier detected"
+  call respoolfile
+  exit 99
+  end
+crid = strip(getstring(6))
+reclen = reclen - 6
+if  crid = "INMR01",
+  | crid = "INMR02",
+  | crid = "INMR03",
+  | crid = "INMR04",
+  | crid = "INMR06",
+  | crid = "INMR07" then
+  do
+  crtype = substr(crid, 5, 2) + 0
+  end
+else
+  do
+  say "Unrecognized control record identifier:" crid
+  call respoolfile
+  exit 99
+  end
+filenum = 0
+select
+when crid = "INMR02" then
+  do
+  /*
+   * A file number precedes the text units in each INMR02
+   * control record, and one or more INMR02 control records
+   * should occur for each file in the transmission.
+   */
+  if reclen < 4 then
+    do
+    say "Invalid INMR02 record: missing or truncated file number"
+    call respoolfile
+    exit 99
+    end
+  filenum = getint(4)
+  reclen = reclen - 4
+  end
+when crid = "INMR03" then
+  do
+  /*
+   * An INMR03 control record should precede immediately the
+   * data records of a file, so establish the file name of
+   * the file and prepare for writing data to it.
+   */
+  if outputfile <> "" then /* close previous file */
+    do
+    call closefile outputfile
+    outputfile = ""
+    end
+  fileidx = fileidx + 1
+  fieldcount = INMR.2.fileidx.INMDSNAM.0
+  if  fieldcount = 3,
+    & length(INMR.2.fileidx.INMDSNAM.1)  = 1,
+    & length(INMR.2.fileidx.INMDSNAM.2) <= 8,
+    & length(INMR.2.fileidx.INMDSNAM.3) <= 8 then
+    do
+    /* it looks like a CMS file name */
+    filename = INMR.2.fileidx.INMDSNAM.2,
+               INMR.2.fileidx.INMDSNAM.3,
+               INMR.2.fileidx.INMDSNAM.1
+    if length(INMR.2.fileidx.INMFM) = 1 then
+      filename = filename || INMR.2.fileidx.INMFM
+    else
+      filename = filename || "1"
+    end
+  else
+    do
+    filename = ""
+    end
+  parse upper var filename rfn rft rfm
+  if fn = "=" then
+    outputfile = rfn
+  else
+    outputfile = fn
+  if ft = "=" then
+    outputfile = outputfile rft
+  else
+    outputfile = outputfile ft
+  if fm = "=" then
+    outputfile = outputfile rfm
+  else
+    outputfile = outputfile fm
+  outputfile = strip(outputfile)
+  if outputfile = "" then
+    do
+    say "Please provide a file name"
+    call respoolfile
+    exit 1
+    end
+  "set cmstype ht"
+  "state" outputfile
+  status = rc
+  "set cmstype rt"
+  if status = 0 then
+    do
+    if isreplace = 1 then
+      do
+      "erase" outputfile
+      if rc <> 0 then exit rc
+      end
+    else
+      do
+      say outputfile "already exists"
+      say "Please provide a different file name or specify (REPLACE"
+      call respoolfile
+      exit 1
+      end
+    end
+  end
+when crid = "INMR06" then
+  do
+  if outputfile <> "" then
+    call closefile outputfile
+  exit 0
+  end
+end /* select */
+/*
+ * Process the text units
+ */
+do while reclen > 0
+  if reclen < 4 then
+    do
+    say "Invalid text unit detected in" crid "record" 
+    call respoolfile
+    exit 99
+    end
+  key = getint(2)
+  fieldcount = getint(2)
+  reclen = reclen - 4
+  if crid = "INMR02" then
+    INMR.crtype.filenum.key.0 = fieldcount
+  else
+    INMR.crtype.key.0 = fieldcount
+  do i = 1 for fieldcount
+    if reclen < 2 then
+      do
+      say "Invalid text unit detected in" crid "record" 
+      call respoolfile
+      exit 99
+      end
+    tulen = getint(2)
+    reclen = reclen - 2
+    if reclen+0 < tulen+0 then
+      do
+      say "Truncated text unit detected in" crid "record" 
+      call respoolfile
+      exit 99
+      end
+    reclen = reclen - tulen
+    select
+    when key = INMFNODE,
+       | key = INMFTIME,
+       | key = INMFUID,
+       | key = INMTNODE,
+       | key = INMTUID,
+       | key = INMUTILN,
+       | key = INMDSNAM,
+       | key = INMFM     then
+      do
+      str = getstring(tulen)
+      if crid = "INMR02" then
+        INMR.crtype.filenum.key.i = str
+      else
+        INMR.crtype.key.i = str
+      end
+    when key = INMNUMF,
+       | key = INMLRECL,
+       | key = INMDSORG,
+       | key = INMRECFM,
+       | key = INMSIZE   then
+      do
+      val = getint(tulen)
+      if crid = "INMR02" then
+        INMR.crtype.filenum.key.i = val
+      else
+        INMR.crtype.key.i = val
+      end
+    otherwise
+      do
+      call skipbytes tulen
+      end
+    end /* select */
+  end
+end
+return
+
+/*
+ * readdatarecord
+ *
+ * Read a data record and write its content to the output file.
+ *
+ * arg(1) : length of record
+ * arg(2) : flags
+ */
+readdatarecord:
+arg reclen, flags
+if bitand(d2c(flags,1), firstmask) = firstmask then /* first segment */
+  outputbuffer = ""
+outputbuffer = outputbuffer || getstring(reclen)
+if bitand(d2c(flags,1), lastmask) = lastmask then /* last segment */
+  do
+  recfm = INMR.3.INMRECFM.1
+  lrecl = INMR.3.INMLRECL.1
+  if recfm >= x2d("8000") & recfm < x2d("C000") then /* fixed size */
+    "execio 1 diskw" outputfile 0 "F" lrecl "(string" outputbuffer
+  else
+    "execio 1 diskw" outputfile 0 "(string" outputbuffer
+  end
+return
+
+/*
+ * getbyte
+ *
+ * Read the next byte from the NETDATA file.
+ *
+ * Returns : the next byte value (0 .. 255)
+ */
+getbyte: procedure expose cursor inputbuffer netdatafile recnum
+do while cursor > length(inputbuffer)
+  "execio 1 diskr" netdatafile recnum "(var inputbuffer"
+  if rc <> 0 then
+    do
+    say "Failed to read NETDATA file, rc =" rc
+    call respoolfile
+    exit rc
+    end
+  recnum = recnum + 1
+  cursor = 1
+end
+byte = c2d(substr(inputbuffer, cursor, 1))
+cursor = cursor + 1
+return byte
+
+/*
+ * getint
+ *
+ * Read an integer value from the NETDATA file.
+ *
+ * arg(1) : width of integer, in bytes
+ *
+ * returns : integer value
+ */
+getint: procedure expose cursor inputbuffer netdatafile recnum
+val = 0
+do arg(1)
+  val = (val * 256) + getbyte()
+end
+return val
+
+/*
+ * getstring
+ *
+ * Read a string of a specified length from the NETDATA file.
+ *
+ * arg(1) : length of string
+ *
+ * Returns : the string
+ */
+getstring: procedure expose cursor inputbuffer netdatafile recnum
+arg len
+str = ""
+do while len > 0
+  iblen = length(inputbuffer)
+  do while cursor > iblen 
+    "execio 1 diskr" netdatafile recnum "(var inputbuffer"
+    if rc <> 0 then
+      do
+      say "Failed to read NETDATA file, rc =" rc
+      call respoolfile
+      exit rc
+      end
+    iblen = length(inputbuffer)
+    recnum = recnum + 1
+    cursor = 1
+  end
+  if cursor + len - 1 <= iblen then
+    do
+    str = str || substr(inputbuffer, cursor, len)
+    cursor = cursor + len
+    len = 0
+    end
+  else
+    do
+    str = str || substr(inputbuffer, cursor)
+    len = len - (iblen - cursor + 1)
+    cursor = iblen + 1
+    end
+end
+return str
+
+/*
+ * skipbytes
+ *
+ * Read and discard a given number of bytes.
+ *
+ * arg(1) : number of bytes to skip
+ */
+skipbytes: procedure expose cursor inputbuffer netdatafile recnum
+do arg(1)
+  discard = getbyte()
+end
+return
+
+/*
+ * closefile
+ *
+ * Close a specified file.
+ *
+ * arg(1) : name of file to close
+ */
+closefile:
+arg filename
+"finis" filename
+say filename "created"
+return
+
+/*
+ * respoolfile
+ *
+ * Return the NETDATA file to the reader spool.
+ */
+respoolfile:
+"execio 0 cp (string SPOOL PUNCH CLASS" class "TO" userid()
+"set cmstype ht"
+"finis" netdatafile
+"punch" netdatafile "(noh"
+status = rc
+"set cmstype rt"
+say "File returned to reader"
+return status

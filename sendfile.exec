@@ -1,0 +1,338 @@
+/*
+ * SENDFILE - send a file in NETDATA format to another user via RSCS
+ *
+ * Created by: Kevin E. Jordan
+ *             Nostalgic Computing Center
+ *             http://www.nostalgiccomputing.org
+ *
+ * Command format:
+ *
+ *   SENDFILE fn ft [fm] [TO] address [(CLASS class[)]]
+ *
+ * where:
+ *
+ *   fn      : file name of file to send
+ *   ft      : file type of file to send
+ *   fm      : file mode of file to send. If omitted, "A1" is used.
+ *   address : userid or network address of file recipient. This
+ *             can have any of the following forms:
+ *               userid         : user on local machine
+ *               userid@node    : user on another machine
+ *               userid AT node : equivalent to userid@node
+ *   class   : spooling class for the file. If omitted, "N" is used.
+ */
+
+class = "N"
+tempfile = "SENDFILE TEMP A1"
+
+call getthisnode
+
+arg params "(" options ")"
+options = strip(options)
+
+parse var params fn ft fm rest
+if fn = "" | ft = "" | ft = "TO" then
+  do
+  say "Please provide a file name and type"
+  exit 1
+  end
+select
+when length(fm) < 2 then
+  do
+  call getrecipient rest
+  end
+when length(fm) > 2 then
+  do
+  call getrecipient fm rest
+  fm = "A"
+  end
+when datatype(substr(fm, 2, 1)) = "NUM" then
+  do
+  call getrecipient rest
+  end
+otherwise
+  do
+  call getrecipient fm rest
+  fm = "A"
+  end
+end
+
+if options <> "" then
+  call getoptions options
+
+"set cmstype ht"
+"listfile" fn ft fm "(al isodate noh lifo"
+status = rc
+"set cmstype rt"
+if status <> 0 then
+  do
+  say "Failed to access" fn ft fm
+  exit 7
+  end
+parse pull fn ft fm rfmt lrecl records blocks year "-" mon "-" day hour ":" min
+if rfmt = "V" then
+  recfm = "0002"x
+else
+  recfm = "8000"x
+filesize = blocks * 800
+lastchange = year || mon || day || hour || min
+timestamp = date("Sorted") time()
+parse var timestamp curtime hour ":" min ":" sec
+curtime = curtime || hour || min || sec
+originuser = strip(userid())
+
+call erasefile tempfile
+
+recordbuffer = ""
+
+/* Append INMR01 header record */
+call appendrecord "E0"x, "INMR01" ||,
+  "0042000100020050"x ||,                                    /* INMLRECL */
+  "10110001"x || d2c(length(thisnode),2) || thisnode ||,     /* INMFNODE */
+  "10120001"x || d2c(length(originuser),2) || originuser ||, /* INMFUID  */
+  "10010001"x || d2c(length(node),2) || node ||,             /* INMTNODE */
+  "10020001"x || d2c(length(user),2) || user ||,             /* INMTUID  */
+  "10240001"x || d2c(length(curtime),2) || curtime ||,       /* INMFTIME */
+  "102F0001000400000001"x                                    /* INMNUMF  */
+
+/* Append INMR02 utility control record */
+call appendrecord "E0"x, "INMR02" ||,
+  "00000001"x ||,                                            /* File no. */
+  "102C00010004"x || d2c(filesize,4) ||,                     /* INMSIZE  */
+  "003C000100024000"x ||,                                    /* INMDSORG */
+  "004200010004"x || d2c(lrecl,4) ||,                        /* INMLRECL */
+  "102800010007"x || "INMCOPY" ||,                           /* INMUTILN */
+  "004900010002"x || recfm ||,                               /* INMRECFM */
+  "000200030001"x || substr(fm,1,1) ||,                      /* INMDSNAM */
+                     d2c(length(fn),2) || fn ||,
+                     d2c(length(ft),2) || ft ||,
+  "102D00010001"x || substr(fm,2,1) ||,                      /* INMFFM   */
+  "10210001"x || d2c(length(lastchange),2) || lastchange     /* INMLCHG  */
+
+/* Append INMR03 data control record (not used by CMS) */
+call appendrecord "E0"x, "INMR03" ||,
+  "102C00010004"x || d2c(filesize,4) ||,                     /* INMSIZE  */
+  "003C000100024000"x ||,                                    /* INMDSORG */
+  "004200010004"x || d2c(lrecl,4) ||,                        /* INMLRECL */
+  "004900010002"x || recfm                                   /* INMRECFM */
+
+/* Append data records */
+do recnum = 1 for records
+  "execio 1 diskr" fn ft fm recnum "(var record"
+  select
+  when rc = 0 then
+    do
+    len = length(record)
+    segments = len % 253
+    if (len // 253) > 0 then segments = segments + 1
+    do i = 1 for segments
+      flags = "00"x
+      if i = 1 then flags = bitor(flags,"80"x)
+      if i = segments then flags = bitor(flags,"40"x)
+      parse var record segment 254 record
+      call appendrecord flags, segment
+      end
+    end
+  when rc = 2 then
+    do
+    leave
+    end
+  otherwise
+    do
+    say "Failed to read" fn ft fm ": rc =" rc
+    exit rc
+    end
+  end
+  end
+
+/* Append INMR06 trailer record and flush buffered output */
+call appendrecord "E0"x, "INMR06"
+call flushoutput
+call spooloutputfile user, node
+call erasefile tempfile
+
+exit
+
+/*
+ * appendrecord
+ *
+ * Append a logical record to the output stream. Write 80-byte physical
+ * records to the output file.
+ *
+ *  arg(1) : flags byte for logical record
+ *  arg(2) : data of logical record
+ */
+appendrecord: procedure expose tempfile recordbuffer
+recordbuffer = recordbuffer || d2c(length(arg(2)) + 2, 1) || arg(1) || arg(2)
+status = 0
+do while length(recordbuffer) >= 80
+  parse var recordbuffer record 81 recordbuffer
+  "execio 1 diskw" tempfile "(var record"
+  status = rc
+  end
+return status
+
+/*
+ * flushoutput
+ *
+ * Flush pending output to the output file.
+ */
+flushoutput: procedure expose tempfile recordbuffer
+status = 0
+if length(recordbuffer) > 0 then
+  do
+  "execio 1 diskw" tempfile "(var recordbuffer"
+  status = rc
+  end
+if status = 0 then
+  do
+  "finis" tempfile
+  status = rc
+  end
+return status
+
+/*
+ * spooloutputfile
+ *
+ * Spool the output file to RSCS or a local reader, depending
+ * upon the recipient's node name.
+ *
+ *  arg(1) : recipient user id
+ *  arg(2) : name of recipient's node
+ */
+spooloutputfile: procedure expose class thisnode tempfile
+arg user, node
+if node = thisnode then
+  do
+  "execio 0 cp (string SPOOL PUNCH CLASS" class "TO" user
+  end
+else
+  do
+  "execio 0 cp (string SPOOL PUNCH CLASS" class "TO RSCS"
+  "execio 0 cp (string TAG DEV PUNCH" node user
+  end
+"set cmstype ht"
+"punch" tempfile "(noh"
+status = rc
+"set cmstype rt"
+return status
+
+/*
+ * gethisnode
+ *
+ * Get the name of this node from SYSTEM NETID S
+ */
+getthisnode:
+thisnode = "VM370CE"
+theirs = queued()
+call readlines "system netid s", 1, "*"
+do while queued() > theirs
+  pull cpuid nodeid netid
+  if netid = "RSCS" then
+    do
+    thisnode = nodeid
+    end
+end
+return
+
+/*
+ * getrecipient
+ *
+ * Get recipient user id and node name.
+ */
+getrecipient: procedure expose user node thisnode
+parse value arg(1) with user at node rest
+if user = "TO" then
+  do
+  str = at node rest
+  parse var str user at node rest
+  end
+select
+when at = "" then
+  do
+  atpos = pos("@", user)
+  if atpos = 0 then
+    do
+    user = strip(user)
+    node = thisnode
+    end
+  else
+    do
+    addr = user
+    user = strip(substr(addr, 1, atpos - 1))
+    node = strip(substr(addr, atpos + 1))
+    end
+  end
+when at <> "AT" | node = "" then
+  do
+  say "Incorrect recipient address"
+  exit 2
+  end
+otherwise
+  do
+  if rest <> "" then
+    do
+    say "Too many arguments"
+    exit 3
+    end
+  end
+end
+return
+
+/*
+ * getoptions
+ *
+ * Get command options.
+ */
+getoptions: procedure expose class
+parse upper value arg(1) with option rest
+select
+when abbrev("CLASS", option, 2) then
+  do
+  if rest = "" | length(rest) > 1 then
+    do
+    say "Incorrect class:" rest
+    exit 6
+    end
+  else
+    do
+    class = rest
+    end
+  end
+otherwise
+  do
+  say "Unrecognized option:" option
+  exit 4
+  end
+end
+return
+
+/*
+ * readlines
+ *
+ * Read lines from a file to the stack.
+ *
+ *  arg(1) : file name
+ *  arg(2) : first record number to read
+ *  arg(3) : number of records to read
+ */
+readlines: procedure
+"set cmstype ht"
+"executil read" arg(1) arg(2) arg(3)
+status = rc
+"set cmstype rt"
+return status
+
+/*
+ * erasefile
+ *
+ * Erase a specified file.
+ *
+ *  arg(1) : file name
+ */
+erasefile: procedure
+"set cmstype ht"
+"erase" arg(1)
+status = rc
+"set cmstype rt"
+return status

@@ -1,0 +1,17 @@
+The SENDFILE command encodes files in NETDATA format before sending them to
+RSCS for delivery to users on other computers, or to local users' virtual
+readers. The NETDATA encoding enables files to be transmitted between computer
+systems as 80-column punch images. The encoding captures the original file
+name, type, and mode of the original file as well as its format, record length,
+and size. This enables a receiving computer system to reproduce the original
+file as precisely as possible.
+
+By default, SENDFILE associates spool class N with the files that it sends.
+This enables a receiving user to identify easily NETDATA-encoded files
+arriving in their virtual reader. The RECEIVE command aligns with this
+default. If you do not specify an explicit spoolid when calling the RECEIVE
+command, it will extract the first class N file in your reader.
+
+Typical use of SENDFILE command:
+
+  SENDFILE MYPROG FORTRAN TO MYFRIEND@THATHOST

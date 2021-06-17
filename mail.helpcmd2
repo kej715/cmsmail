@@ -1,0 +1,10 @@
+The MAIL command stores received email messages in a file named MAILBOX MAIL A1.
+Messages arrive in your reader as class M punch files. When the MAIL command
+enters mailbox management mode, and when you select the "G" command, MAIL moves
+any class M punch files found in your reader to your mailbox file.
+
+When you send an email message, the message is spooled as a class M punch
+file. If the recipient is a user on the local machine, the email message is
+spooled directly to that user's reader. If the recipient is a user on another
+machine in the network, the email message is spooled to RSCS, and RSCS transmits
+the email message toward the destination.

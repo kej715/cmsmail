@@ -1,0 +1,42 @@
+The CMSMAIL package provides BITNet-like email utilities for VM/CMS and RSCS.
+It is intended to be installed on hobbyist computer systems such as VM370CE
+running on the Hercules IBM 370 emulator.
+
+The utilities are implemented in REXX. They reproduce the email experience
+that users of VM/CMS had on BITNet during the 1980's. The MAIL utility provides
+a simple user interface for sending and managing personal email, the SENDFILE
+utility enables users to encode files in NETDATA format and send them to other
+users (e.g., users of other machines connected to HNET), and the RECEIVE utility
+enables users to decode NETDATA files received from other users.
+
+To install the CMSMAIL package on VM370CE V1-R1.1, perform the following steps:
+
+1) Log into MAINT
+2) Use your 3270 terminal emulator to upload the CMSMAIL VMARC archive
+3) Use VMARC to extract the files from the archive:
+
+     VMARC UNPACK CMSMAIL VMARC
+
+4) Release and re-access the U and Y minidisks so that you can write
+   to them:
+
+     REL U
+     REL Y
+     ACC 19D U
+     ACC 19E Y
+
+5) Copy the EXEC's and help files from the A minidisk to the U and Y
+   minidisks:
+
+     COPYFILE MAIL EXEC A = = Y2 (REP
+     COPYFILE MAIL HELPCMD A = = U2 (REP
+     COPYFILE MAIL HELPCMD2 A = = U2 (REP
+     COPYFILE RECEIVE EXEC A = = Y2 (REP
+     COPYFILE RECEIVE HELPCMD A = = U2 (REP
+     COPYFILE RECEIVE HELPCMD2 A = = U2 (REP
+     COPYFILE SENDFILE EXEC A = = Y2 (REP
+     COPYFILE SENDFILE HELPCMD A = = U2 (REP
+     COPYFILE SENDFILE HELPCMD2 A = = U2 (REP
+
+6) Logoff and log back in to re-access the U and Y minidisks in the
+   normal way.

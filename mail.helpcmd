@@ -1,0 +1,50 @@
+MAIL                                                      CMS Transient command
+ 
+Use the MAIL command to read and send email messages, and to manage email
+messages in your mailbox.  The format of the MAIL command is:
++----------+------------------------------------------------------------------+
+| MAIL     | [address]                                                        |
++----------+------------------------------------------------------------------+
+where:
+ 
+address  is the email address of a user to whom to send an email message. If
+         this field is specified, the MAIL command prompts you for the subject
+         and body of the email message, it spools the email message for
+         delivery to the recipient, and then it exits. If this field is
+         omitted, the MAIL command enters mailbox management mode, enabling you
+         to read, reply to, and delete email messages in your mailbox.
+
+Email address:
+   An email address can be specified using any of the following formats:
+
+      user
+      user@node
+      user AT node
+
+   where:
+      user  is the 1 to 8 character identifier of the user to whom you want
+            to send an email message
+      node  is the 1 to 8 character name of the machine on which the user's
+            mailbox resides. If this is omitted, the name of the local machine
+            is used.
+
+Mailbox Management Mode:
+   If an email address is not specified when the MAIL command is called, the
+   command enters mailbox management mode. Mailbox management mode provides
+   commands enabling you to read, reply to, and delete email messages in your
+   mailbox. It begins by displaying header information about all of the email
+   messages, and then it invites you to enter a command or an email message
+   number. The following commands are recognized:
+
+   D - mark for deletion the last email message displayed
+   G - get new email messages from your reader
+   H - display headers of email messages in your mailbox
+   L - same as H
+   Q - quit from MAIL without deleting any email messages
+   R - reply to the last email message displayed
+   S - send an email message
+   U - unmark for deletion the last message displayed
+   X - eXit from MAIL and delete mll email essages marked for deletion
+
+   To display an email message, enter its number. Press the return key to
+   advance to the next email message.

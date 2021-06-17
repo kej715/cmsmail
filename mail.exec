@@ -1,0 +1,615 @@
+/*----------
+ *
+ * Created by: Kevin E. Jordan
+ *             Nostalgic Computing Center
+ *             http://www.nostalgiccomputing.org
+ *
+ *----------
+
+ MAIL recognizes these commands:
+
+   D - mark for deletion the last email message displayed
+   G - get new email messages from your reader
+   H - display headers of email messages in your mailbox
+   L - same as H
+   Q - quit from MAIL without deleting any email messages
+   R - reply to the last email message displayed
+   S - send an email message
+   U - unmark for deletion the last message displayed
+   X - eXit from MAIL and delete mll email essages marked for deletion
+
+ To display an email message, enter its number. Press the return key to
+ advance to the next email message.
+
+ Email addresses may be entered using any of these forms:
+
+   user
+   user@node
+   user AT node
+*/
+maxlinewidth = 80
+mailboxfile = "MAILBOX MAIL A1"
+messagefile = "MESSAGE MAIL A1"
+tempmbxfile = "MAILBOX TEMP A1"
+
+parse arg addr
+call init
+if addr = "" then
+  do
+  call readnewmail
+  call readheaders
+  call displayheaders
+  call processcommands
+  end
+else
+  do
+  call sendmessage addr
+  end
+call finis
+ 
+/*
+ * init
+ *
+ * Initialize the program.
+ */
+init:
+status. = " "
+"cp set imsg off"
+"cp spool rdr class *"
+call erasefile messagefile
+call erasefile tempmbxfile
+
+/* get the timezone of the machine */
+"execio 1 cp (string Q TIME"
+pull . . . timezone .
+ 
+/* get name of this node from SYSTEM NETID S */
+thisnode = "VM370CE"
+theirs = queued()
+call readlines "system netid s", 1, "*"
+do while queued() > theirs
+  pull cpuid nodeid netid
+  if netid = "RSCS" then
+    do
+    thisnode = nodeid
+    end
+end
+say "Welcome to Mail v1.0 on node" thisnode
+say ""
+return
+ 
+/*
+ * finis
+ *
+ * Gracefully exit the program.
+ */
+finis:
+say "Goodbye, come back soon!"
+"cp set imsg on"
+exit
+ 
+/*
+ * sendmessage
+ *
+ * Create a mail message and send it to the recipient address
+ * specified as a parameter.
+ */
+sendmessage:
+parse value arg(1) with user at node
+if at = "" | translate(at) <> "AT" | node = "" then
+  do
+  atpos = pos("@", user)
+  if atpos = 0 then
+    do
+    user = strip(user)
+    node = thisnode
+    end
+  else
+    do
+    addr = user
+    user = strip(substr(addr, 1, atpos - 1))
+    node = strip(substr(addr, atpos + 1))
+    end
+  end
+say "Please enter the subject of the message:"
+parse pull subject
+queue "Date:" date("Normal") time("Normal") timezone
+queue "From:" strip(userid())||"@"||thisnode
+queue "To:" user||"@"||node
+queue "Subject:" subject
+queue ""
+call writestackedlines messagefile, 5
+say "Please enter message body, and end with a line containing only '.':"
+do forever
+  parse pull line
+  if line = "." then
+    leave
+  push line
+  call writestackedlines messagefile, 1
+end
+call spoolmessage user, node
+if result = 0 then
+  say "Message sent to" user||"@"||node
+else
+  say "Failed to send message to" user||"@"||node ", rc =" result
+call erasefile messagefile
+return
+ 
+/*
+ * processcommands
+ *
+ * Read and process commands entered by the user.
+ */
+processcommands:
+msgnum = 0
+do forever
+  say ""
+  say "Please enter a command or message number (? for help)"
+  pull command
+  select
+    when datatype(command, "NUM") then
+      do
+      msgnum = command
+      call displaymessage msgnum
+      end
+    when command = "" then
+      do
+      msgnum = msgnum + 1
+      call displaymessage msgnum
+      end
+    when command = "D" then
+      do
+      if msgnum > 0 & msgnum <= msgcount then
+        do
+        status.msgnum = "DELETE"
+        say "Message" msgnum "marked to be deleted"
+        msgnum = msgnum + 1
+        call displaymessage msgnum
+        end
+      end
+    when command = "G" then
+      do
+      call readnewmail
+      call readheaders
+      end
+    when command = "H" | command = "L" then
+      do
+      call displayheaders
+      end
+    when command = "Q" then
+      do
+      say "Keeping all messages"
+      call finis
+      end
+    when command = "R" then
+      do
+      if msgnum > 0 & msgnum <= msgcount then
+        call sendreply
+      end
+    when command = "S" then
+      do
+      say "Please enter recipient address:"
+      parse pull addr
+      call sendmessage addr
+      end
+    when command = "U" then
+      do
+      if msgnum > 0 & msgnum <= msgcount then
+        do
+        status.msgnum = " "
+        say "Message" msgnum "unmarked to be deleted"
+        end
+      end
+    when command = "X" then
+      do
+      call updatemailbox
+      call finis
+      end
+    when command = "?" then
+      do
+      linenum = 1
+      do while sourceline(linenum) <> " *----------"
+        linenum = linenum + 1
+      end
+      linenum = linenum + 1
+      do while sourceline(linenum) <> "*/"
+        say sourceline(linenum)
+        linenum = linenum + 1
+      end
+      end
+    otherwise
+      do
+      say "Unrecognized command, press '?' for help."
+      end
+    end
+end
+ 
+/*
+ * readheaders
+ *
+ * Read headers of messages in the mailbox.
+ */
+readheaders:
+msgnum = 1
+recnum = 1
+readhdr = 1
+start.msgnum = recnum
+do forever
+  call readlines mailboxfile, recnum, 1
+  select
+    when result = 0 then
+      do
+      parse pull line
+      recnum = recnum + 1
+      select
+        when line = "." then
+          do
+          end.msgnum = recnum - 1
+          msgnum = msgnum + 1
+          start.msgnum = recnum
+          readhdr = 1
+          end
+        when length(line) = 0 then
+          do
+          readhdr = 0
+          end
+        when translate(substr(line,1,7)) = "STATUS:" then
+          do
+          if readhdr = 1 & status.msgnum = " " then
+            do
+            status.msgnum = translate(strip(substr(line,8)))
+            end
+          end
+        when translate(substr(line,1,5)) = "FROM:" then
+          do
+          if readhdr = 1 then
+            from.msgnum = strip(substr(line,6))
+          end
+        when translate(substr(line,1,5)) = "DATE:" then
+          do
+          if readhdr = 1 then
+            do
+            datestr = strip(substr(line,6))
+            commapos = pos(",", datestr)
+            if commapos > 0 then
+              do
+              datestr = strip(substr(datestr, commapos + 1))
+              end
+            parse var datestr datehour ":" min ":" rest
+            date.msgnum = datehour||":"||min
+            end
+          end
+        when translate(substr(line,1,8)) = "SUBJECT:" then
+          do
+          if readhdr = 1 then
+            subject.msgnum = strip(substr(line,9))
+          end
+        otherwise
+          do
+          end
+        end
+      end
+    when result = -12 then
+      do
+      leave
+      end
+    when result = 28 then
+      do
+      leave
+      end
+    otherwise
+      do
+      say "Failed to read mailbox, rc =" result
+      leave /* HERE */
+      call finis
+      end
+    end
+end
+msgcount = msgnum - 1
+return
+ 
+/*
+ * displayheaders
+ *
+ * Display message headers
+ */
+displayheaders:
+say ""
+if msgcount < 1 then
+  do
+  say "Mailbox is empty"
+  return
+  end
+say "Msg #" left("From",17) left("Date",20) left("Subject",35)
+say left("-",5,"-") left("-",17,"-") left("-",20,"-") left("-",35,"-")
+m = 1
+do while m <= msgcount
+  select
+    when status.m = "UNREAD" then
+      statusflag = "*"
+    when status.m = "DELETE" then
+      statusflag = "X"
+    otherwise
+      statusflag = " "
+  end
+  say statusflag right(m,3) left(from.m,17) left(date.m,20) left(subject.m,35)
+  m = m + 1
+end
+return
+ 
+/*
+ * displaymessage
+ *
+ * Display the contents of a specified mail message.
+ */
+displaymessage:
+msgnum = arg(1)
+if msgnum < 1 | msgnum > msgcount then
+  do
+  say "End of mailbox"
+  return
+  end
+say "==================== Message" msgnum "===================="
+call readlines mailboxfile, start.msgnum, 1
+parse pull line
+if translate(substr(line, 1, 7)) <> "STATUS:" then
+  do
+  say line
+  end
+linecount = end.msgnum - (start.msgnum + 1)
+call readlines mailboxfile, start.msgnum + 1, linecount
+do linecount
+  parse pull line
+  if line = ".." then
+    say "."
+  else
+    say line
+end
+if status.msgnum = "UNREAD" then
+  status.msgnum = "READ"
+return
+ 
+/*
+ * readnewmail
+ *
+ * Append mail messages in the virtual reader to the mailbox file.
+ */
+readnewmail:
+theirs = queued()
+"set cmstype ht"
+"executil qreader class m"
+status = rc
+"set cmstype rt"
+if status <> 0 then
+  do
+  say "No new mail"
+  return
+  end
+spoolids = ""
+count = 0
+do while queued() > theirs
+  pull spoolid rest
+  spoolids = spoolids spoolid
+  count = count + 1
+end
+if count < 1 then
+  do
+  say "No new mail"
+  return
+  end
+if count > 1 then
+  say count "new mail messages"
+else
+  say count "new mail message"
+"execio 0 cp (string ORDER RDR" spoolids
+do count
+  "set cmstype ht"
+  "readcard" messagefile
+  "set cmstype rt"
+  theirs = queued()
+  call readlines messagefile, 1, "*"
+  push "Status: Unread"
+  do while queued() > theirs
+    parse pull line
+    if line = "." then
+      call writeline mailboxfile, ".."
+    else
+      do
+      push line
+      call writestackedlines mailboxfile, 1
+      end
+  end
+  call writeline mailboxfile, "."
+  call erasefile messagefile
+end
+return
+ 
+/*
+ * sendreply
+ *
+ * Compose and send a reply to the current message.
+ */
+sendreply:
+addr = from.msgnum
+atpos = pos("@", addr)
+if atpos = 0 then
+  do
+  user = strip(addr)
+  node = thisnode
+  end
+else
+  do
+  user = strip(substr(addr, 1, atpos - 1))
+  node = strip(substr(addr, atpos + 1))
+  end
+queue "Date:" date("Normal") time("Normal") timezone
+queue "From:" strip(userid())||"@"||thisnode
+queue "To:" user||"@"||node
+if translate(substr(subject.msgnum, 1, 3)) = "RE:" then
+  queue "Subject:" subject.msgnum
+else
+  queue "Subject: re:" subject.msgnum
+queue ""
+call writestackedlines messagefile, 5
+say "Please enter reply body, and end with a line containing only '.':"
+do forever
+  parse pull line
+  if line = "." then
+    leave
+  push line
+  call writestackedlines messagefile, 1
+end
+queue ""
+queue user||"@"||node "wrote:"
+queue "----------------------------------------"
+call writestackedlines messagefile, 3
+call readlines mailboxfile, start.msgnum, 1
+parse pull line
+if translate(substr(line, 1, 7)) <> "STATUS:" then
+  do
+  push strip(left("| " || line, maxlinewidth))
+  call writestackedlines messagefile, 1
+  end
+linecount = end.msgnum - (start.msgnum + 1)
+linenum = start.msgnum + 1
+do linecount
+  call readlines mailboxfile, linenum, 1
+  linenum = linenum + 1
+  parse pull line
+  if line = ".." then
+    line = "."
+  push strip(left("| " || line, maxlinewidth))
+  call writestackedlines messagefile, 1
+end
+call spoolmessage user, node
+if result = 0 then
+  say "Reply sent to" user||"@"||node
+else
+  say "Failed to send reply to" user||"@"||node ", rc =" result
+call erasefile messagefile
+return
+ 
+/*
+ * spoolmessage
+ *
+ * Spool a mail message to RSCS or a local reader, depending
+ * upon the recipient's node name.
+ *
+ *  arg(1) : recipient user id
+ *  arg(2) : name of recipient's node
+ */
+spoolmessage: procedure expose thisnode messagefile
+arg user, node
+if node = thisnode then
+  do
+  "execio 0 cp (string SPOOL PUNCH CLASS M TO" user
+  end
+else
+  do
+  "execio 0 cp (string SPOOL PUNCH CLASS M TO RSCS"
+  "execio 0 cp (string TAG DEV PUNCH" node user
+  end
+"set cmstype ht"
+"punch" messagefile "(noh"
+status = rc
+"set cmstype rt"
+return status
+ 
+/*
+ * updatemailbox
+ *
+ * Copy mailbox file to a new file, and omit messages marked for deletion.
+ */
+updatemailbox:
+m = 1
+msgswritten = 0
+do while m <= msgcount
+  if status.m <> "DELETE" then
+    do
+    if status.m <> " " then
+      do
+      push "Status:" status.m
+      call writestackedlines tempmbxfile, 1
+      end
+    call readlines mailboxfile, start.m, 1
+    parse pull line
+    if translate(substr(line,1,7)) <> "STATUS:" then
+      do
+      push line
+      call writestackedlines tempmbxfile, 1
+      end
+    linecount = (end.m - (start.m + 1)) + 1
+    call readlines mailboxfile, (start.m + 1), linecount
+    call writestackedlines tempmbxfile, linecount
+    msgswritten = msgswritten + 1
+    end
+  m = m + 1
+end
+call erasefile mailboxfile
+if msgswritten > 0 then
+  do
+  "set cmstype ht"
+  "rename" tempmbxfile mailboxfile
+  "set cmstype rt"
+  end
+return
+ 
+/*
+ * readlines
+ *
+ * Read lines from a file to the stack.
+ *
+ *  arg(1) : file name
+ *  arg(2) : first record number to read
+ *  arg(3) : number of records to read
+ */
+readlines: procedure
+"set cmstype ht"
+"executil read" arg(1) arg(2) arg(3)
+status = rc
+"set cmstype rt"
+return status
+ 
+/*
+ * writestackedlines
+ *
+ * Write lines to a file from the stack.
+ *
+ *  arg(1) : file name
+ *  arg(2) : number of stacked lines
+ */
+writestackedlines: procedure expose maxlinewidth
+"set cmstype ht"
+"executil write" arg(1) "*" arg(2) "v" maxlinewidth "lcase"
+status = rc
+"set cmstype rt"
+return status
+ 
+/*
+ * writeline
+ *
+ * Write a specified line of text to a file.
+ *
+ *  arg(1) : file name
+ *  arg(2) : text to write
+ */
+writeline: procedure
+"set cmstype ht"
+"executil write" arg(1) "* 1 v 100 lcase ("||arg(2)||")"
+status = rc
+"set cmstype rt"
+return status
+ 
+/*
+ * erasefile
+ *
+ * Erase a specified file.
+ *
+ *  arg(1) : file name
+ */
+erasefile: procedure
+"set cmstype ht"
+"erase" arg(1)
+status = rc
+"set cmstype rt"
+return status

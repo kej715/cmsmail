@@ -1,0 +1,36 @@
+SENDFILE                                                  CMS Transient command
+ 
+Use the SENDFILE command to send a CMS disk file to another user on this
+computer or via RSCS to a user on a computer elsewhere in the network.  The
+format of the SENDFILE command is:
++----------+------------------------------------------------------------------+
+| SENDFILE | fn ft [* fm] [TO] address [([CLass c][)]]                        |
++----------+------------------------------------------------------------------+
+where:
+ 
+fn       is the filename of the file to be sent. This field must be specified.
+ 
+ft       is the filetype of the file to be sent. This field must be specified.
+ 
+fm       is the filemode of the file to be sent. If fm is not specified, your
+         A-disk and its extensions are searched.
+
+address  identifies the user to whom to send the file. Address can be specified
+         using any of the following formats:
+
+           user
+           user@node
+           user AT node
+
+         where:
+           user  is the 1 to 8 character identifier of the user to whom you
+                 want to send the file
+           node  is the 1 to 8 character name of the machine on which the user
+                 resides. If this is omitted, the name of the local machine
+                 is used.
+ 
+Options:
+ 
+CLass c  specifies the spool class to be associated with the file. c is a
+         one-character alphameric field whose values can be A through Z, or
+         0 through 9. If the CLass option is not specified, class N is used.

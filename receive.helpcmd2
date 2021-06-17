@@ -1,0 +1,38 @@
+The RECEIVE command extracts files from your virtual reader, decodes
+them from NETDATA format, and writes the decoded content to local files.
+The NETDATA encoding enables files to be transmitted between computer
+systems as 80-column punch images. The encoding captures the original
+file name, type, and mode of the original file as well as its format,
+record length, and size. This enables the RECEIVE command to reproduce
+the original file as precisely as possible.
+
+By default, RECEIVE looks for class N files in your reader, and it
+extracts the first one that it finds. However, you may specify an
+explicit spoolid to override this default behavior and cause RECEIVE
+to extract a specific file from your reader, regardless of its spool
+class. All arguments are optional, so the simplest form of the command
+is:
+
+    RECEIVE
+
+In this case, RECEIVE will extract the first class N file from your
+reader, it will decode it, and it will attempt to use information
+transmitted in the NETDATA encoding to provide the name, type, and mode
+of the file to which the decoded content will be written.
+
+To extract a specific file from your reader, specify its spoolid as in:
+
+    RECEIVE 123
+
+You can override the name, type, and/or mode of the file to be written
+by specifying any of them on the command line, as in these examples:
+
+    RECEIVE APROGRAM FORTRAN
+    RECEIVE 451 APROGRAM COBOL
+
+By default, RECEIVE will not replace an existing file. You can enable
+it to replace an existing file by specifying the "REPlace" option, as
+in these examples:
+
+    RECEIVE APROGRAM FORTRAN (REP
+    RECEIVE (REP

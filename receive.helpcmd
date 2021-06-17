@@ -1,0 +1,35 @@
+RECEIVE                                                   CMS Transient command
+ 
+Use the RECEIVE command to receive a file that has been sent to you by another
+user using the SENDFILE command (or by a similar command on another type of
+computer). Files sent to you via the SENDFILE (or similar) command will arrive
+in your virtual reader. The RECEIVE command extracts these files from your
+reader and decodes them for you.  The format of the RECEIVE command is:
++----------+------------------------------------------------------------------+
+| RECEIVE  | [spoolid] [fn | = [ft | = [fm | =]]] [(REPlace[)]]               |
++----------+------------------------------------------------------------------+
+where:
+ 
+spoolid  is the spoolid of a specific file to extract from your reader. If this
+         argument is omitted, the first class N file in your reader is
+         extracted.
+
+fn       is the file name to assign to the extracted and decoded file. If this
+         argument is omitted, or if it is specified as "=", RECEIVE will
+         attempt to use the file name provided by the sending computer.
+
+ft       is the file type to assign to the extracted and decoded file. If this
+         argument is omitted, or if it is specified as "=", RECEIVE will
+         attempt to use the file type provided by the sending computer, if any.
+
+fm       is the file mode to assign to the extracted and decoded file. If this
+         argument is omitted, or if it is specified as "=", RECEIVE will
+         attempt to use the file mode provided by the sending computer, or
+         "A1" if the sending computer does not provide a file mode.
+
+Options:
+
+REPlace  enables RECEIVE to replace an existing file if the file name, type,
+         and mode specified for the received file matches a file that
+         already exists. When this option is omitted, RECEIVE will not replace
+         an existing file.
