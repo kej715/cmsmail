@@ -68,12 +68,12 @@ steps to build RSCS with NJE and activate it:
     REL E
     ACC 59F A
  
-10. Upload the rscsnje.vmarc file from:
+10. Upload the nje4rscs.vmarc file from:
  
-    https://www.dropbox.com/s/y1ymtxp23ok5daa/rscsnje.vmarc?dl=0 to minidisk A
+    https://www.dropbox.com/s/y1ymtxp23ok5daa/nje4rscs.vmarc?dl=0 to minidisk A
     and unpack it:
  
-    Upload rscsnje.vmarc using your 3270 terminal emulator, then
+    Upload nje4rscs.vmarc using your 3270 terminal emulator, then
     VMARC UNPACK RSCSNJE VMARC
  
 11. Edit LAXLINES COPY A to define the devices specified in the DEDICATE line(s)
