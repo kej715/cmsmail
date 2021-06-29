@@ -4,10 +4,11 @@ running on the Hercules IBM 370 emulator.
 
 The utilities are implemented in REXX. They reproduce the email experience
 that users of VM/CMS had on BITNet during the 1980's. The MAIL utility provides
-a simple user interface for sending and managing personal email, the SENDFILE
-utility enables users to encode files in NETDATA format and send them to other
-users (e.g., users of other machines connected to HNET), and the RECEIVE utility
-enables users to decode NETDATA files received from other users.
+a simple user interface for sending and managing personal email, and it also
+implements a mail server. The SENDFILE utility enables users to encode files in
+ NETDATA format and send them to other users (e.g., users of other machines
+connected to HNET), and the RECEIVE utility enables users to decode NETDATA
+files received from other users.
 
 To install the CMSMAIL package on VM370CE V1-R1.1, perform the following steps:
 
@@ -40,3 +41,15 @@ To install the CMSMAIL package on VM370CE V1-R1.1, perform the following steps:
 
 6) Logoff and log back in to re-access the U and Y minidisks in the
    normal way.
+
+7) Add a user named MAILER to the USER DIRECT file and use the DIRECT
+   command to activate the updated USER DIRECT. The mail server will run
+   in a virtual machine with this userid.
+
+8) Add the following command to the PROFILE EXEC of user AUTOLOG1 to start
+   the mail server automatically when the machine is IPL'd:
+
+     CP AUTOLOG MAILER <password> EXEC MAIL (SERVER
+
+   where <password> is the password you assigned to userid MAILER in
+   step 7.

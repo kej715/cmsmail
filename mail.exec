@@ -8,12 +8,13 @@
 
  MAIL recognizes these commands:
 
+   A - reply to all recipients of the last email message displayed
    D - mark for deletion the last email message displayed
    G - get new email messages from your reader
    H - display headers of email messages in your mailbox
    L - same as H
    Q - quit from MAIL without deleting any email messages
-   R - reply to the last email message displayed
+   R - reply only to the sender of the last email message displayed
    S - send an email message
    U - unmark for deletion the last message displayed
    X - eXit from MAIL and delete mll email essages marked for deletion
@@ -27,25 +28,90 @@
    user@node
    user AT node
 */
+mailerid = "MAILER" /* userid of VM running MAIL in server mode */
 maxlinewidth = 80
 mailboxfile = "MAILBOX MAIL A1"
-messagefile = "MESSAGE MAIL A1"
 tempmbxfile = "MAILBOX TEMP A1"
+messagefile = "MESSAGE MAIL A1"
+tempmsgfile = "MESSAGE TEMP A1"
+servermode = 0
 
-parse arg addr
+parse arg addrs "(" options ")"
 call init
-if addr = "" then
+subject = ""
+if options <> "" then
   do
-  call readnewmail
+  options = strip(options)
+  parse var options keyword rest
+  keyword = translate(strip(keyword))
+  if keyword = "SERVER" then
+    do
+    call servermode
+    exit 0
+    end
+  else if abbrev("SUBJECT", keyword, 2) then
+    do
+    subject = strip(rest)
+    end
+  else
+    do
+    say "Unrecognized option:" keyword
+    exit 1
+    end
+  end
+if addrs = "" then
+  do
+  count = readnewmail()
+  if count < 1 then
+    say "No new mail"
+  else if count = 1 then
+    say count "new mail message"
+  else
+    say count "new mail messages"
   call readheaders
   call displayheaders
   call processcommands
   end
 else
   do
-  call sendmessage addr
+  rcptcount = 0
+  do while addrs <> ""
+    parse upper var addrs user at node rest
+    if at = "AT" & node <> "" then
+      do
+      addrs = strip(rest)
+      end
+    else
+      do
+      addrs = strip(at node rest)
+      parse var user user "@" node
+      if node = "" then
+        node = thisnode
+      end
+    rcptcount = rcptcount + 1
+    rcpts.rcptcount = strip(user)||"@"||strip(node)
+    end
+  rcpts.0 = rcptcount
+  call sendmessage rcpts., subject
   end
 call finis
+
+/*
+ * servermode
+ *
+ * Enter mail server mode. Loop forever processing mail messages arriving
+ * in the virtual reader.
+ */
+servermode:
+say "Entering mail server mode ..."
+servermode = 1
+do forever
+  count = readnewmail()
+  if count < 1 then
+    do
+    "execio 0 cp (string SLEEP 10 SEC"
+    end
+end
  
 /*
  * init
@@ -53,11 +119,17 @@ call finis
  * Initialize the program.
  */
 init:
+cc. = ""
+from. = ""
+replyto. = ""
 status. = " "
+subject. = ""
+to. = ""
 "cp set imsg off"
 "cp spool rdr class *"
 call erasefile messagefile
 call erasefile tempmbxfile
+call erasefile tempmsgfile
 
 /* get the timezone of the machine */
 "execio 1 cp (string Q TIME"
@@ -91,34 +163,64 @@ exit
 /*
  * sendmessage
  *
- * Create a mail message and send it to the recipient address
- * specified as a parameter.
+ * Create a mail message and send it to a specified set of
+ * recipient addresses.
+ *
+ * arg(1) : recipient addresses
+ * arg(2) : subject of message
  */
 sendmessage:
-parse value arg(1) with user at node
-if at = "" | translate(at) <> "AT" | node = "" then
+parse arg rcpts., subject
+if subject = "" then
   do
-  atpos = pos("@", user)
-  if atpos = 0 then
-    do
-    user = strip(user)
-    node = thisnode
-    end
-  else
-    do
-    addr = user
-    user = strip(substr(addr, 1, atpos - 1))
-    node = strip(substr(addr, atpos + 1))
-    end
+  say "Please enter the subject of the message:"
+  parse pull subject
   end
-say "Please enter the subject of the message:"
-parse pull subject
+queue "HELO" thisnode
+queue "MAIL FROM:<"strip(userid())||"@"||thisnode||">"
+call writestackedlines messagefile, 2
+do i = 1 for rcpts.0
+  parse upper value rcpts.i with user at node
+  if at = "" | at <> "AT" | node = "" then
+    do
+    parse var user user "@" node
+    if node = "" then
+      node = thisnode
+    end
+  user = strip(user)
+  node = strip(node)
+  queue "RCPT TO:<"||user||"@"||node||">"
+  call writestackedlines messagefile, 1
+end
+queue "DATA"
 queue "Date:" date("Normal") time("Normal") timezone
 queue "From:" strip(userid())||"@"||thisnode
-queue "To:" user||"@"||node
+header = "To:"
+do i = 1 for rcpts.0
+  parse upper value rcpts.i with user at node
+  if at = "" | at <> "AT" | node = "" then
+    do
+    parse var user user "@" node
+    if node = "" then
+      node = thisnode
+    end
+  user = strip(user)
+  node = strip(node)
+  addr = user||"@"||node
+  if length(header) + length(addr) + 2 > maxlinewidth then
+    do
+    queue header
+    call writestackedlines messagefile, 1
+    header = "   "
+    end
+  header = header||" "||addr
+  if i < rcpts.0 then
+    header = header||","
+end
+queue header
 queue "Subject:" subject
 queue ""
-call writestackedlines messagefile, 5
+call writestackedlines messagefile, 3
 say "Please enter message body, and end with a line containing only '.':"
 do forever
   parse pull line
@@ -127,11 +229,12 @@ do forever
   push line
   call writestackedlines messagefile, 1
 end
-call spoolmessage user, node
+call writeline messagefile, "."
+call spoolmessage mailerid, thisnode
 if result = 0 then
-  say "Message sent to" user||"@"||node
+  say "Message sent"
 else
-  say "Failed to send message to" user||"@"||node ", rc =" result
+  say "Failed to send message, rc =" result
 call erasefile messagefile
 return
  
@@ -157,6 +260,11 @@ do forever
       msgnum = msgnum + 1
       call displaymessage msgnum
       end
+    when command = "A" then
+      do
+      if msgnum > 0 & msgnum <= msgcount then
+        call sendreply 1
+      end
     when command = "D" then
       do
       if msgnum > 0 & msgnum <= msgcount then
@@ -169,7 +277,13 @@ do forever
       end
     when command = "G" then
       do
-      call readnewmail
+      count = readnewmail()
+      if count < 1 then
+        say "No new mail"
+      else if count = 1 then
+        say count "new mail message"
+      else
+        say count "new mail messages"
       call readheaders
       end
     when command = "H" | command = "L" then
@@ -184,13 +298,40 @@ do forever
     when command = "R" then
       do
       if msgnum > 0 & msgnum <= msgcount then
-        call sendreply
+        call sendreply 0
       end
     when command = "S" then
       do
-      say "Please enter recipient address:"
-      parse pull addr
-      call sendmessage addr
+      rcptcount = 0
+      say "Please enter recipient addresses separated by commas:"
+      parse pull list
+      list = strip(list)
+      do forever
+        if index(list, ",") = 0 then
+          do
+          if list <> "" then
+            do
+            rcptcount = rcptcount + 1
+            rcpts.rcptcount = list
+            end
+          leave
+          end
+        else
+          do
+          parse var list addr "," list
+          list = strip(list)
+          rcptcount = rcptcount + 1
+          rcpts.rcptcount = addr
+          if list = "" then
+            do
+            say "Please continue to enter recipient addresses separated by commas:"
+            parse pull list
+            list = strip(list)
+            end
+          end
+      end
+      rcpts.0 = rcptcount
+      call sendmessage rcpts.
       end
     when command = "U" then
       do
@@ -229,7 +370,8 @@ end
  *
  * Read headers of messages in the mailbox.
  */
-readheaders:
+readheaders: procedure expose cc. date. end. from. mailboxfile msgcount start.,
+                              status. subject. to.
 msgnum = 1
 recnum = 1
 readhdr = 1
@@ -237,74 +379,110 @@ start.msgnum = recnum
 do forever
   call readlines mailboxfile, recnum, 1
   select
-    when result = 0 then
+  when result = 0 then
+    do
+    parse pull line
+    recnum = recnum + 1
+    if line = "." then
       do
-      parse pull line
-      recnum = recnum + 1
-      select
-        when line = "." then
+      end.msgnum = recnum - 1
+      msgnum = msgnum + 1
+      start.msgnum = recnum
+      readhdr = 1
+      end
+    else if readhdr = 1 then
+      do
+      if length(strip(line)) = 0 then
+        do
+        readhdr = 0
+        end
+      else
+        do
+        if substr(line,1,1) = " " then
           do
-          end.msgnum = recnum - 1
-          msgnum = msgnum + 1
-          start.msgnum = recnum
-          readhdr = 1
+          text = line
           end
-        when length(line) = 0 then
+        else
           do
-          readhdr = 0
+          parse var line keyword ":" text
           end
-        when translate(substr(line,1,7)) = "STATUS:" then
+        keyword = translate(keyword)
+        text = strip(text)
+        select
+        when keyword = "STATUS" then
           do
-          if readhdr = 1 & status.msgnum = " " then
+          if status.msgnum = " " then
             do
-            status.msgnum = translate(strip(substr(line,8)))
+            status.msgnum = translate(text)
             end
           end
-        when translate(substr(line,1,5)) = "FROM:" then
+        when keyword = "FROM" then
           do
-          if readhdr = 1 then
-            from.msgnum = strip(substr(line,6))
+          from.msgnum = text
           end
-        when translate(substr(line,1,5)) = "DATE:" then
+        when keyword = "REPLY-TO" then
           do
-          if readhdr = 1 then
+          replyto.msgnum = text
+          end
+        when keyword = "DATE" then
+          do
+          commapos = pos(",", text)
+          if commapos > 0 then
             do
-            datestr = strip(substr(line,6))
-            commapos = pos(",", datestr)
-            if commapos > 0 then
-              do
-              datestr = strip(substr(datestr, commapos + 1))
-              end
-            parse var datestr datehour ":" min ":" rest
-            date.msgnum = datehour||":"||min
+            text = strip(substr(text, commapos + 1))
+            end
+          parse var text datehour ":" min ":" .
+          date.msgnum = datehour||":"||min
+          end
+        when keyword = "SUBJECT" then
+          do
+          subject.msgnum = text
+          end
+        when keyword = "TO" then
+          do
+          to.msgnum = text
+          do forever
+            call readlines mailboxfile, recnum, 1
+            parse pull line
+            if length(strip(line)) = 0 | substr(line,1,1) <> " " then leave
+            to.msgnum = to.msgnum||" "||strip(line)
+            recnum = recnum + 1
             end
           end
-        when translate(substr(line,1,8)) = "SUBJECT:" then
+        when keyword = "CC" then
           do
-          if readhdr = 1 then
-            subject.msgnum = strip(substr(line,9))
+          cc.msgnum = text
+          do forever
+            call readlines mailboxfile, recnum, 1
+            parse pull line
+            if length(strip(line)) = 0 | substr(line,1,1) <> " " then leave
+            cc.msgnum = cc.msgnum||" "||strip(line)
+            recnum = recnum + 1
+            end
           end
         otherwise
           do
           end
+        end /* select */
         end
       end
-    when result = -12 then
-      do
-      leave
-      end
-    when result = 28 then
-      do
-      leave
-      end
-    otherwise
-      do
-      say "Failed to read mailbox, rc =" result
-      leave /* HERE */
-      call finis
-      end
     end
-end
+  when result = -12 then
+    do
+    leave
+    end
+  when result = 28 then
+    do
+    leave
+    end
+  otherwise
+    do
+    say "Failed to read mailbox, rc =" result
+    leave
+    call finis
+    end
+  end /* select */
+end /* do forever */
 msgcount = msgnum - 1
 return
  
@@ -372,7 +550,11 @@ return
 /*
  * readnewmail
  *
- * Append mail messages in the virtual reader to the mailbox file.
+ * Query the virtual reader for email messages. Class M files in the
+ * reader are expected to be email messages. Distinguish plain
+ * RFC822-formatted messages from BSMTP-formatted ones, and handle
+ * them accordingly. Messages addressing the calling user are appended
+ * to the mailbox file.
  */
 readnewmail:
 theirs = queued()
@@ -381,10 +563,7 @@ theirs = queued()
 status = rc
 "set cmstype rt"
 if status <> 0 then
-  do
-  say "No new mail"
-  return
-  end
+  return 0
 spoolids = ""
 count = 0
 do while queued() > theirs
@@ -392,65 +571,296 @@ do while queued() > theirs
   spoolids = spoolids spoolid
   count = count + 1
 end
-if count < 1 then
+if count > 0 then
   do
-  say "No new mail"
-  return
+  "execio 0 cp (string ORDER RDR" spoolids
+  do count
+    "set cmstype ht"
+    "readcard" messagefile
+    "set cmstype rt"
+    theirs = queued()
+    call readlines messagefile, 1, "*"
+    parse pull token rest 
+    push token rest
+    if translate(token) = "HELO" then
+      do
+      call readbsmtpmessage theirs
+      end
+    else /* RFC822-formatted message without BSMTP envelope */
+      do
+      call readrfc822message theirs
+      end
+    call erasefile messagefile
   end
-if count > 1 then
-  say count "new mail messages"
-else
-  say count "new mail message"
-"execio 0 cp (string ORDER RDR" spoolids
-do count
-  "set cmstype ht"
-  "readcard" messagefile
-  "set cmstype rt"
-  theirs = queued()
-  call readlines messagefile, 1, "*"
-  push "Status: Unread"
+  end
+return count
+
+/*
+ * readrfc822message
+ *
+ * Read an RFC822-formatted message without a BSMTP envelope and
+ * append it to the user's mailbox file.
+ *
+ * arg(1) - stack limit value
+ */
+readrfc822message:
+arg theirs
+push "Status: Unread"
+do while queued() > theirs
+  parse pull line
+  if line = "." then
+    call writeline mailboxfile, ".."
+  else
+    do
+    push line
+    call writestackedlines mailboxfile, 1
+    end
+  end
+call writeline mailboxfile, "."
+return
+
+/*
+ * readbsmtpmessage
+ *
+ * Read a BSMTP-formatted message and parse its envelope. Recognize
+ * "RCPT TO:" commands and parse the addresses they specify. Append
+ * the RFC822-formatted message content to the user's mailbox file
+ * if any "RCPT TO:" addresses match the calling user's address.
+ * Forward the message to the virtual reader(s) of other user(s)
+ * addressed.
+ *
+ * arg(1) - stack limit value
+ */
+readbsmtpmessage:
+arg theirs
+/* parse the BSMTP envelope */
+thisuser = strip(userid())||"@"||thisnode
+isthisuser = 0
+rcptcount = 0
+originator = ""
+originhost = ""
+do while queued() > theirs
+  parse pull command rest
+  command = translate(command)
+  select
+  when command = "RCPT" then
+    do
+    parse var rest "TO" ":" "<" address ">"
+    address = translate(strip(address))
+    if address = thisuser then
+      do
+      isthisuser = 1
+      end
+    else if address <> "" then
+      do
+      rcptcount = rcptcount + 1
+      rcpts.rcptcount = address
+      end
+    end
+  when command = "HELO" then
+    do
+    originhost = strip(rest)
+    end
+  when command = "MAIL" then
+    do
+    parse var rest "FROM" ":" "<" address ">"
+    originator = strip(address)
+    end
+  when command = "DATA" then
+    do
+    leave
+    end
+  end /* select */
+end /* do while */
+if servermode <> 1 & isthisuser = 1 & rcptcount < 1 then
+  do
+  /*
+   * MAIL is not operating in server mode, and The message has
+   * exactly one recipient, and the recipient is the calling user.
+   */
+  call writeline mailboxfile, "Status: Unread"
   do while queued() > theirs
     parse pull line
     if line = "." then
-      call writeline mailboxfile, ".."
+      do
+      do while queued() > theirs
+        pull line
+      end
+      leave
+      end
     else
       do
       push line
       call writestackedlines mailboxfile, 1
       end
-  end
+    end
   call writeline mailboxfile, "."
+  return
+  end
+/*
+ * MAIL is operating in server mode, or the message is addressed to
+ * another user, or it has multiple recipients, one of which might
+ * be the calling user.
+ */
+if servermode = 1 then
+  do
+  if originhost = thisnode then
+    push "Received: by" thisnode "with BSMTP;",
+         date("Normal") time("Normal") timezone
+  else
+    push "Received: from" originhost "by" thisnode "with BSMTP;",
+         date("Normal") time("Normal") timezone
+  call writestackedlines tempmsgfile, 1
+  end
+do while queued() > theirs
+  parse pull line
+  if line = "." then
+    do
+    do while queued() > theirs
+      pull line
+    end
+    leave
+    end
+  else
+    do
+    push line
+    call writestackedlines tempmsgfile, 1
+    end
+  end
+"finis" tempmsgfile
+if isthisuser = 1 then
+  do
+  call writeline mailboxfile, "Status: Unread"
+  "set cmstype ht"
+  "copyfile" tempmsgfile mailboxfile "(append"
+  "set cmstype rt"
+  call writeline mailboxfile, "."
+  end
+call erasefile messagefile
+do i = 1 for rcptcount
+  address = rcpts.i
+  parse var address user "@" node
+  if node = "" then node = thisnode
+  queue "HELO" originhost
+  queue "MAIL FROM:<"||originator||">"
+  queue "RCPT TO:<"||user||"@"||node||">"
+  queue "DATA"
+  call writestackedlines messagefile, 4
+  "set cmstype ht"
+  "copyfile" tempmsgfile messagefile "(append"
+  "set cmstype rt"
+  call writeline messagefile, "."
+  "finis" messagefile
+  call spoolmessage user, node
   call erasefile messagefile
 end
+call erasefile tempmsgfile
 return
  
 /*
  * sendreply
  *
  * Compose and send a reply to the current message.
+ *
+ * arg(1) : 0 if reply, 1 if reply-all
  */
 sendreply:
-addr = from.msgnum
-atpos = pos("@", addr)
-if atpos = 0 then
+arg isreplyall
+thisuser = strip(userid())||"@"||thisnode
+cclist = ""
+if isreplyall = 1 then
   do
-  user = strip(addr)
-  node = thisnode
+  tolist = from.msgnum
+  if replyto.msgnum <> "" & replyto.msgnum <> from.msgnum then
+    tolist = tolist||", "||replyto.msgnum
+  if to.msgnum <> "" then
+    do
+    call parseaddresses to.msgnum
+    do i = 1 for addresses.0
+      if thisuser <> translate(addresses.i) then
+        tolist = tolist||", "||addresses.i
+      end
+    end
+  if cc.msgnum <> "" then
+    do
+    call parseaddresses cc.msgnum
+    do i = 1 for addresses.0
+      if thisuser <> translate(addresses.i) then
+        do
+        if cclist = "" then
+          cclist = addresses.i
+        else
+          cclist = cclist||", "||addresses.i
+        end
+      end
+    end
   end
 else
   do
-  user = strip(substr(addr, 1, atpos - 1))
-  node = strip(substr(addr, atpos + 1))
+  if replyto.msgnum <> "" then
+    tolist = replyto.msgnum
+  else
+    tolist = from.msgnum
   end
+queue "HELO "||thisnode
+queue "MAIL FROM:<"strip(userid())||"@"||thisnode||">"
+linecount = 2
+call parseaddresses tolist
+do i = 1 for addresses.0
+  queue "RCPT TO:<"||addresses.i||">"
+  end
+linecount = linecount + addresses.0
+if cclist <> "" then
+  do
+  call parseaddresses cclist
+  do i = 1 for addresses.0
+    queue "RCPT TO:<"||addresses.i||">"
+    end
+  linecount = linecount + addresses.0
+  end
+queue "DATA"
 queue "Date:" date("Normal") time("Normal") timezone
-queue "From:" strip(userid())||"@"||thisnode
-queue "To:" user||"@"||node
+queue "From:" thisuser
+linecount = linecount + 3
+maxrcptwidth = maxlinewidth - 8
+header = "To: "
+do while length(tolist) > maxrcptwidth
+  bp = lastpos(",",tolist,maxrcptwidth)
+  if bp = 0 then bp = lastpos(" ",tolist,maxrcptwidth)
+  queue header||substr(tolist,1,bp)
+  linecount = linecount + 1
+  tolist = strip(substr(tolist,bp+1))
+  header = "    "
+  end
+if tolist <> "" then
+  do
+  queue header||tolist
+  linecount = linecount + 1
+  end
+if cclist <> "" then
+  do
+  header = "cc: "
+  do while length(cclist) > maxrcptwidth
+    bp = lastpos(",",cclist,maxrcptwidth)
+    if bp = 0 then bp = lastpos(" ",cclist,maxrcptwidth)
+    queue header||substr(cclist,1,bp)
+    linecount = linecount + 1
+    cclist = strip(substr(cclist,bp+1))
+    header = "    "
+    end
+  if cclist <> "" then
+    do
+    queue header||cclist
+    linecount = linecount + 1
+    end
+  end
 if translate(substr(subject.msgnum, 1, 3)) = "RE:" then
   queue "Subject:" subject.msgnum
 else
   queue "Subject: re:" subject.msgnum
 queue ""
-call writestackedlines messagefile, 5
+linecount = linecount + 2
+call writestackedlines messagefile, linecount
 say "Please enter reply body, and end with a line containing only '.':"
 do forever
   parse pull line
@@ -460,7 +870,7 @@ do forever
   call writestackedlines messagefile, 1
 end
 queue ""
-queue user||"@"||node "wrote:"
+queue from.msgnum "wrote:"
 queue "----------------------------------------"
 call writestackedlines messagefile, 3
 call readlines mailboxfile, start.msgnum, 1
@@ -476,17 +886,63 @@ do linecount
   call readlines mailboxfile, linenum, 1
   linenum = linenum + 1
   parse pull line
-  if line = ".." then
-    line = "."
   push strip(left("| " || line, maxlinewidth))
   call writestackedlines messagefile, 1
 end
-call spoolmessage user, node
+call writeline messagefile, "."
+call spoolmessage mailerid, thisnode
 if result = 0 then
-  say "Reply sent to" user||"@"||node
+  say "Reply sent"
 else
-  say "Failed to send reply to" user||"@"||node ", rc =" result
+  say "Failed to send reply, rc =" result
 call erasefile messagefile
+return
+
+/*
+ * parseaddresses
+ *
+ * Parse the addresses from a list of RFC822-formatted addresses
+ * and place them in the global "addresses." stem.
+ *
+ * arg(1) : RFC822-formatted address list
+ */
+parseaddresses: procedure expose addresses.
+parse arg list
+addrcount = 0
+do while list <> ""
+  parse var list addr "," list
+  addr = strip(addr)
+  list = strip(list)
+  ai = pos("@",addr)
+  if ai > 0 then
+    do
+    li = pos("<",addr)
+    gi = pos(">",addr)
+    if li > 0 & li < gi & li < ai & ai < gi then
+      do
+      parse var addr "<" user "@" node ">"
+      end
+    else
+      do
+      parse var addr user "@" node
+      user = strip(user)
+      node = strip(node)
+      bi = lastpos(" ",user)
+      if bi > 0 then
+        do
+        user = substr(user,bi + 1)
+        end
+      bi = pos(" ",node)
+      if bi > 0 then
+        do
+        node = substr(node,i, bi - 1)
+        end
+      end
+    addrcount = addrcount + 1
+    addresses.addrcount = strip(user)||"@"||strip(node)
+    end
+  end /* while */
+addresses.0 = addrcount
 return
  
 /*

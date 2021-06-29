@@ -4,7 +4,10 @@ enters mailbox management mode, and when you select the "G" command, MAIL moves
 any class M punch files found in your reader to your mailbox file.
 
 When you send an email message, the message is spooled as a class M punch
-file. If the recipient is a user on the local machine, the email message is
-spooled directly to that user's reader. If the recipient is a user on another
-machine in the network, the email message is spooled to RSCS, and RSCS transmits
-the email message toward the destination.
+file to the mail server. Normally, the mail server is a virtual machine running
+with userid MAILER. The mail server determines whether the recipients of an
+email message are local users or users on other machines. If the recipient is a
+user on the local machine, the mail server will spool the email message
+directly to that user's virtual reader. If the recipient is a user on another
+machine in the network, the mail server will spool the email message to RSCS,
+and RSCS will transmit it toward the mail server that serves the recipient.

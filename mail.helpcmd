@@ -3,16 +3,34 @@ MAIL                                                      CMS Transient command
 Use the MAIL command to read and send email messages, and to manage email
 messages in your mailbox.  The format of the MAIL command is:
 +----------+------------------------------------------------------------------+
-| MAIL     | [address]                                                        |
+| MAIL     | [address [address ...]] [( [SERVER] | [SUbject text] [)]]        |
 +----------+------------------------------------------------------------------+
 where:
  
 address  is the email address of a user to whom to send an email message. If
          this field is specified, the MAIL command prompts you for the subject
-         and body of the email message, it spools the email message for
-         delivery to the recipient, and then it exits. If this field is
-         omitted, the MAIL command enters mailbox management mode, enabling you
-         to read, reply to, and delete email messages in your mailbox.
+         and body of the email message, it spools the email message to the
+         mail server (see SERVER option, below) for delivery to the
+         recipient(s), and then it exits. If multiple addresses are specified,
+         each addressed recipient receives a copy of the email message.  If
+         this field is omitted, the MAIL command enters mailbox management
+         mode, enabling you to read, reply to, and delete email messages in
+         your mailbox.
+
+Options:
+
+SERVER   causes MAIL to enter mail server mode. In mail server mode, MAIL
+         endlessly queries its virtual reader for email messages (class M
+         files), and it forwards them to the recipients to which they have
+         been addressed. It forwards email messages to local users by spooling
+         them to virtual readers as class M files. It forwards email messages
+         to users on other machines by using RSCS to transfer them to the
+         mail servers on those machines.
+
+SUbject  enables you to specify the subject of an email message to be
+         sent to recipients whose addresses have been specified on the
+         MAIL command. When this option is omitted, MAIL prompts interactively
+         for the subject of the email message.
 
 Email address:
    An email address can be specified using any of the following formats:
@@ -36,12 +54,13 @@ Mailbox Management Mode:
    messages, and then it invites you to enter a command or an email message
    number. The following commands are recognized:
 
+   A - reply to all recipients of the last email message displayed
    D - mark for deletion the last email message displayed
    G - get new email messages from your reader
    H - display headers of email messages in your mailbox
    L - same as H
    Q - quit from MAIL without deleting any email messages
-   R - reply to the last email message displayed
+   R - reply only to the sender of the last email message displayed
    S - send an email message
    U - unmark for deletion the last message displayed
    X - eXit from MAIL and delete mll email essages marked for deletion
