@@ -29,12 +29,13 @@
    user AT node
 */
 mailerid = "MAILER" /* userid of VM running MAIL in server mode */
+version = "1.1"
 maxlinewidth = 80
 mailboxfile = "MAILBOX MAIL A1"
 tempmbxfile = "MAILBOX TEMP A1"
 messagefile = "MESSAGE MAIL A1"
 tempmsgfile = "MESSAGE TEMP A1"
-servermode = 0
+isservermode = 0
 
 parse arg addrs "(" options ")"
 call init
@@ -61,6 +62,8 @@ if options <> "" then
   end
 if addrs = "" then
   do
+  say "Welcome to Mail v"||version||" on node" thisnode
+  say ""
   count = readnewmail()
   if count < 1 then
     say "No new mail"
@@ -103,8 +106,10 @@ call finis
  * in the virtual reader.
  */
 servermode:
-say "Entering mail server mode ..."
-servermode = 1
+say "Mail v"||version||" entering server mode ..."
+isservermode = 1
+"cp set smsg off"
+"cp spool console start noterm"
 do forever
   count = readnewmail()
   if count < 1 then
@@ -146,8 +151,6 @@ do while queued() > theirs
     thisnode = nodeid
     end
 end
-say "Welcome to Mail v1.0 on node" thisnode
-say ""
 return
  
 /*
@@ -178,7 +181,7 @@ if subject = "" then
   end
 queue "HELO" thisnode
 queue "MAIL FROM:<"strip(userid())||"@"||thisnode||">"
-call writestackedlines messagefile, 2
+linecount = 2
 do i = 1 for rcpts.0
   parse upper value rcpts.i with user at node
   if at = "" | at <> "AT" | node = "" then
@@ -190,11 +193,14 @@ do i = 1 for rcpts.0
   user = strip(user)
   node = strip(node)
   queue "RCPT TO:<"||user||"@"||node||">"
-  call writestackedlines messagefile, 1
+  linecount = linecount + 1
 end
 queue "DATA"
+queue "Message-Id: <"||strip(userid())||"."||date("Century")||"."||,
+      time("Seconds")||"@"||thisnode||">"
 queue "Date:" date("Normal") time("Normal") timezone
 queue "From:" strip(userid())||"@"||thisnode
+linecount = linecount + 4
 header = "To:"
 do i = 1 for rcpts.0
   parse upper value rcpts.i with user at node
@@ -210,7 +216,7 @@ do i = 1 for rcpts.0
   if length(header) + length(addr) + 2 > maxlinewidth then
     do
     queue header
-    call writestackedlines messagefile, 1
+    linecount = linecount + 1
     header = "   "
     end
   header = header||" "||addr
@@ -220,7 +226,7 @@ end
 queue header
 queue "Subject:" subject
 queue ""
-call writestackedlines messagefile, 3
+call writestackedlines messagefile, linecount + 3
 say "Please enter message body, and end with a line containing only '.':"
 do forever
   parse pull line
@@ -672,7 +678,7 @@ do while queued() > theirs
     end
   end /* select */
 end /* do while */
-if servermode <> 1 & isthisuser = 1 & rcptcount < 1 then
+if isservermode <> 1 & isthisuser = 1 & rcptcount < 1 then
   do
   /*
    * MAIL is not operating in server mode, and The message has
@@ -702,7 +708,7 @@ if servermode <> 1 & isthisuser = 1 & rcptcount < 1 then
  * another user, or it has multiple recipients, one of which might
  * be the calling user.
  */
-if servermode = 1 then
+if isservermode = 1 then
   do
   if originhost = thisnode then
     push "Received: by" thisnode "with BSMTP;",
@@ -819,9 +825,11 @@ if cclist <> "" then
   linecount = linecount + addresses.0
   end
 queue "DATA"
+queue "Message-Id: <"||strip(userid())||"."||date("Century")||"."||,
+      time("Seconds")||"@"||thisnode||">"
 queue "Date:" date("Normal") time("Normal") timezone
 queue "From:" thisuser
-linecount = linecount + 3
+linecount = linecount + 4
 maxrcptwidth = maxlinewidth - 8
 header = "To: "
 do while length(tolist) > maxrcptwidth
@@ -859,8 +867,7 @@ if translate(substr(subject.msgnum, 1, 3)) = "RE:" then
 else
   queue "Subject: re:" subject.msgnum
 queue ""
-linecount = linecount + 2
-call writestackedlines messagefile, linecount
+call writestackedlines messagefile, linecount + 2
 say "Please enter reply body, and end with a line containing only '.':"
 do forever
   parse pull line
