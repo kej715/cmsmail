@@ -942,7 +942,7 @@ do while list <> ""
       bi = pos(" ",node)
       if bi > 0 then
         do
-        node = substr(node,i, bi - 1)
+        node = substr(node,1,bi - 1)
         end
       end
     addrcount = addrcount + 1
@@ -970,7 +970,7 @@ if node = thisnode then
 else
   do
   "execio 0 cp (string SPOOL PUNCH CLASS M TO RSCS"
-  "execio 0 cp (string TAG DEV PUNCH" node user
+  "execio 0 cp (string TAG DEV PUNCH" node "MAILER"
   end
 "set cmstype ht"
 "punch" messagefile "(noh"
