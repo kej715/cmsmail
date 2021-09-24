@@ -28,8 +28,10 @@
    user@node
    user AT node
 */
-mailerid = "MAILER" /* userid of VM running MAIL in server mode */
-version = "1.1"
+mailerid    = "MAILER" /* userid of VM running MAIL in server mode    */
+gatewaynode = "NCCMAX" /* name of node serving as an Internet gateway */
+gatewayid   = "MAILER" /* userid of mail server on gateway node       */
+version = "1.2"
 maxlinewidth = 80
 mailboxfile = "MAILBOX MAIL A1"
 tempmbxfile = "MAILBOX TEMP A1"
@@ -681,7 +683,7 @@ end /* do while */
 if isservermode <> 1 & isthisuser = 1 & rcptcount < 1 then
   do
   /*
-   * MAIL is not operating in server mode, and The message has
+   * MAIL is not operating in server mode, and the message has
    * exactly one recipient, and the recipient is the calling user.
    */
   call writeline mailboxfile, "Status: Unread"
@@ -710,13 +712,12 @@ if isservermode <> 1 & isthisuser = 1 & rcptcount < 1 then
  */
 if isservermode = 1 then
   do
+  push "         " date("Normal") time("Normal") timezone
   if originhost = thisnode then
-    push "Received: by" thisnode "with BSMTP;",
-         date("Normal") time("Normal") timezone
+    push "Received: by" thisnode "with BSMTP;"
   else
-    push "Received: from" originhost "by" thisnode "with BSMTP;",
-         date("Normal") time("Normal") timezone
-  call writestackedlines tempmsgfile, 1
+    push "Received: from" originhost "by" thisnode "with BSMTP;"
+  call writestackedlines tempmsgfile, 2
   end
 do while queued() > theirs
   parse pull line
@@ -757,7 +758,10 @@ do i = 1 for rcptcount
   "set cmstype rt"
   call writeline messagefile, "."
   "finis" messagefile
-  call spoolmessage user, node
+  if index(node, ".") = 0 then
+    call spoolmessage user, node
+  else
+    call spoolmessage gatewayid, gatewaynode
   call erasefile messagefile
 end
 call erasefile tempmsgfile
