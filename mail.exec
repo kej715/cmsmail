@@ -28,10 +28,11 @@
    user@node
    user AT node
 */
-mailerid    = "MAILER" /* userid of VM running MAIL in server mode    */
-gatewaynode = "NCCMAX" /* name of node serving as an Internet gateway */
-gatewayid   = "MAILER" /* userid of mail server on gateway node       */
 version = "1.2"
+mailerid    = "MAILER" /* userid of VM running MAIL in server mode       */
+inetdomain  = "nostalgiccomputing.org" /* this machine's Internet domain */
+gatewaynode = "NCCMAX" /* name of node serving as an Internet gateway    */
+gatewayid   = "MAILER" /* userid of mail server on gateway node          */
 maxlinewidth = 80
 mailboxfile = "MAILBOX MAIL A1"
 tempmbxfile = "MAILBOX TEMP A1"
@@ -153,6 +154,7 @@ do while queued() > theirs
     thisnode = nodeid
     end
 end
+thisnodealias = translate(thisnode||"."||inetdomain)
 return
  
 /*
@@ -642,8 +644,7 @@ return
 readbsmtpmessage:
 arg theirs
 /* parse the BSMTP envelope */
-thisuser = strip(userid())||"@"||thisnode
-isthisuser = 0
+isme = 0
 rcptcount = 0
 originator = ""
 originhost = ""
@@ -655,12 +656,9 @@ do while queued() > theirs
     do
     parse var rest "TO" ":" "<" address ">"
     address = translate(strip(address))
-    if address = thisuser then
+    if address <> "" then
       do
-      isthisuser = 1
-      end
-    else if address <> "" then
-      do
+      isme = isthisuser(address)
       rcptcount = rcptcount + 1
       rcpts.rcptcount = address
       end
@@ -680,7 +678,7 @@ do while queued() > theirs
     end
   end /* select */
 end /* do while */
-if isservermode <> 1 & isthisuser = 1 & rcptcount < 1 then
+if isservermode <> 1 & isme = 1 & rcptcount = 1 then
   do
   /*
    * MAIL is not operating in server mode, and the message has
@@ -713,7 +711,7 @@ if isservermode <> 1 & isthisuser = 1 & rcptcount < 1 then
 if isservermode = 1 then
   do
   push "         " date("Normal") time("Normal") timezone
-  if originhost = thisnode then
+  if isthisnode(originhost) = 1 then
     push "Received: by" thisnode "with BSMTP;"
   else
     push "Received: from" originhost "by" thisnode "with BSMTP;"
@@ -735,7 +733,7 @@ do while queued() > theirs
     end
   end
 "finis" tempmsgfile
-if isthisuser = 1 then
+if isme = 1 then
   do
   call writeline mailboxfile, "Status: Unread"
   "set cmstype ht"
@@ -758,8 +756,8 @@ do i = 1 for rcptcount
   "set cmstype rt"
   call writeline messagefile, "."
   "finis" messagefile
-  if index(node, ".") = 0 then
-    call spoolmessage user, node
+  if isthisnode(node) = 1 then
+    call spoolmessage user, thisnode
   else
     call spoolmessage gatewayid, gatewaynode
   call erasefile messagefile
@@ -955,6 +953,41 @@ do while list <> ""
   end /* while */
 addresses.0 = addrcount
 return
+
+/*
+ * isthisnode
+ *
+ * Determine whether a node name identifies the local machine.
+ *
+ * arg(1) : node name
+ *
+ * returns 1 if local machine
+ */
+isthisnode:
+parse upper arg node
+if node = thisnode | node = thisnodealias then
+  return 1
+else
+  return 0
+
+/*
+ * isthisuser
+ *
+ * Determine whether an address refers to the user currently running MAIL EXEC.
+ *
+ * arg(1) : recipient address
+ *
+ * returns 1 if address refers to this user
+ */
+isthisuser:
+parse upper arg addr
+uid = strip(userid())
+if (addr = uid) |,
+   (addr = uid||"@"||thisnode) |,
+   (addr = uid||"@"||thisnodealias) then
+  return 1
+else
+  return 0
  
 /*
  * spoolmessage
@@ -965,9 +998,9 @@ return
  *  arg(1) : recipient user id
  *  arg(2) : name of recipient's node
  */
-spoolmessage: procedure expose thisnode messagefile
+spoolmessage: procedure expose thisnode thisnodealias messagefile
 arg user, node
-if node = thisnode then
+if isthisnode(node) = 1 then
   do
   "execio 0 cp (string SPOOL PUNCH CLASS M TO" user
   end
