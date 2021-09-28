@@ -117,7 +117,10 @@ do forever
   count = readnewmail()
   if count < 1 then
     do
-    "execio 0 cp (string SLEEP 10 SEC"
+    event = '$TIMER'(10) /* schedule timer event then wait */
+    event = '$WAIT'('TIMER')
+    If event <> 'TIMER' then
+      call '$TIMER'('CANCEL')
     end
 end
  
