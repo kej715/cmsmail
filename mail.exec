@@ -157,7 +157,8 @@ do while queued() > theirs
     thisnode = nodeid
     end
 end
-thisnodealias = translate(thisnode||"."||inetdomain)
+thisnodeinet   = translate(thisnode||"."||inetdomain)
+thisnodebitnet = translate(thisnode||".BITNET")
 return
  
 /*
@@ -748,7 +749,10 @@ call erasefile messagefile
 do i = 1 for rcptcount
   address = rcpts.i
   parse var address user "@" node
-  if node = "" then node = thisnode
+  if node = "" then
+    do
+    node = thisnode
+    end
   queue "HELO" originhost
   queue "MAIL FROM:<"||originator||">"
   queue "RCPT TO:<"||user||"@"||node||">"
@@ -761,6 +765,12 @@ do i = 1 for rcptcount
   "finis" messagefile
   if isthisnode(node) = 1 then
     call spoolmessage user, thisnode
+  else if isnjenode(node) = 1 then
+    do
+    parse var node host "." domain
+    node = strip(host)
+    call spoolmessage user, node
+    end
   else
     call spoolmessage gatewayid, gatewaynode
   call erasefile messagefile
@@ -968,10 +978,37 @@ return
  */
 isthisnode:
 parse upper arg node
-if node = thisnode | node = thisnodealias then
+if node = thisnode |,
+   node = thisnodeinet  |,
+   node = thisnodebitnet then
   return 1
 else
   return 0
+
+/*
+ * isnjenode
+ *
+ * Detemine whether a node name identifies a node in the NJE network.
+ * Currently, unqualified node names and node names with domain
+ * ".BITNet" are determined to be NJE nodes.
+ *
+ * arg(1) : node name
+ */
+isnjenode:
+parse upper arg node
+parse var node host "." domain
+if domain = "" then
+  do
+  return 1
+  end
+else
+  do
+  domain = strip(domain)
+  if domain = "BITNET" then
+    return 1
+  else
+    return 0
+  end
 
 /*
  * isthisuser
@@ -987,7 +1024,8 @@ parse upper arg addr
 uid = strip(userid())
 if (addr = uid) |,
    (addr = uid||"@"||thisnode) |,
-   (addr = uid||"@"||thisnodealias) then
+   (addr = uid||"@"||thisnodeinet) |,
+   (addr = uid||"@"||thisnodebitnet) then
   return 1
 else
   return 0
@@ -1001,7 +1039,7 @@ else
  *  arg(1) : recipient user id
  *  arg(2) : name of recipient's node
  */
-spoolmessage: procedure expose thisnode thisnodealias messagefile
+spoolmessage: procedure expose thisnode thisnodeinet thisnodebitnet messagefile
 arg user, node
 if isthisnode(node) = 1 then
   do
@@ -1010,7 +1048,7 @@ if isthisnode(node) = 1 then
 else
   do
   "execio 0 cp (string SPOOL PUNCH CLASS M TO RSCS"
-  "execio 0 cp (string TAG DEV PUNCH" node "MAILER"
+  "execio 0 cp (string TAG DEV PUNCH" node user
   end
 "set cmstype ht"
 "punch" messagefile "(noh"
