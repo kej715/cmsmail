@@ -44,7 +44,20 @@ To install the CMSMAIL package on VM370CE V1-R1.1, perform the following steps:
 
 7) Add a user named MAILER to the USER DIRECT file and use the DIRECT
    command to activate the updated USER DIRECT. The mail server will run
-   in a virtual machine with this userid.
+   in a virtual machine with this userid. An acceptable definition looks
+   like:
+
+     USER MAILER PASSWORD 15M 16M G
+      IPL CMS
+      CONSOLE 009 3215
+      SPOOL 00E 1403 A
+      SPOOL 00C 2540 READ *
+      SPOOL 00D 2540 PUNCH A
+      LINK MAINT 190 190 RR
+      LINK MAINT 19D 19D RR
+      LINK MAINT 19E 19E RR
+     *        cuu type adr num volser mode readpw   writepw  multpw
+      MDISK   191 3350 001 200 VM50U1 MR   ALL      WRITE    MULT
 
 8) Add the following command to the PROFILE EXEC of user AUTOLOG1 to start
    the mail server automatically when the machine is IPL'd:
