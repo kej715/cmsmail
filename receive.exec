@@ -277,7 +277,7 @@ when crid = "INMR03" then
     exit 1
     end
   "set cmstype ht"
-  "state" outputfile
+  "statew" outputfile
   status = rc
   "set cmstype rt"
   if status = 0 then
