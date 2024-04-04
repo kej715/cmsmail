@@ -59,6 +59,10 @@ To install the CMSMAIL package on VM370CE V1-R1.1, perform the following steps:
      *        cuu type adr num volser mode readpw   writepw  multpw
       MDISK   191 3350 001 200 VM50U1 MR   ALL      WRITE    MULT
 
+   Note that the MDISK entry, above, is an example only. Examine your minidisk
+   map to ensure that the minidisk chosen for MAILER does not overlap an existing
+   VM's space.
+
 8) Add the following command to the PROFILE EXEC of user AUTOLOG1 to start
    the mail server automatically when the machine is IPL'd:
 
