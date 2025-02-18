@@ -17,7 +17,7 @@
    R - reply only to the sender of the last email message displayed
    S - send an email message
    U - unmark for deletion the last message displayed
-   X - eXit from MAIL and delete mll email essages marked for deletion
+   X - eXit from MAIL and delete all email messages marked for deletion
 
  To display an email message, enter its number. Press the return key to
  advance to the next email message.
@@ -988,7 +988,7 @@ else
 /*
  * isnjenode
  *
- * Detemine whether a node name identifies a node in the NJE network.
+ * Determine whether a node name identifies a node in the NJE network.
  * Currently, unqualified node names and node names with domain
  * ".BITNet" are determined to be NJE nodes.
  *
